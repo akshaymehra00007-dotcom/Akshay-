@@ -196,17 +196,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [darkMode]);
 
   // Auth State
-  const [currentRole, setCurrentRole] = useState<UserRole | null>(() => {
-    return loadFromStorage<UserRole | null>('CURRENT_ROLE', 'admin');
-  });
+  // Always start logged out. A visitor must authenticate before any portal is rendered.
+  const [currentRole, setCurrentRole] = useState<UserRole | null>(null);
 
   const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
     return loadFromStorage<AdminUser | null>('ADMIN_USER', initialAdmin);
   });
 
-  const [currentStudent, setCurrentStudent] = useState<Student | null>(() => {
-    return loadFromStorage<Student | null>('CURRENT_STUDENT', initialStudents[0]);
-  });
+  const [currentStudent, setCurrentStudent] = useState<Student | null>(null);
 
   // Main Data States
   const [students, setStudents] = useState<Student[]>(() => {
@@ -409,7 +406,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       emailOrPhone === '9845012345' ||
       emailOrPhone.toLowerCase().includes('admin');
 
-    if (isMatch || _pass.length >= 4) {
+    if (isMatch && _pass === 'admin123') {
       setCurrentRole('admin');
       setAdminUser(initialAdmin);
       showToast(`Welcome back, ${initialAdmin.name}!`, 'success', 'Admin Signed In');
@@ -443,6 +440,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = () => {
     setCurrentRole(null);
+    setCurrentStudent(null);
+    localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + 'CURRENT_ROLE');
+    localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + 'CURRENT_STUDENT');
     showToast('You have been logged out successfully.', 'info');
   };
 
