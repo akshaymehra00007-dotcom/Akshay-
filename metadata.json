@@ -1,0 +1,6 @@
+{
+  "name": "Smart Fee & Membership Management",
+  "description": "Premium SaaS fee, membership, and automated reminder platform for Music Institutes with Admin & Student portals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

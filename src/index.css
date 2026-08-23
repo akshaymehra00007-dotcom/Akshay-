@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-serif: 'Playfair Display', Georgia, serif;
+    --font-display: 'Cinzel', serif;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #0A0A0B;
+    color: #F4F4F5;
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: var(--font-serif);
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  /* Custom subtle scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #27272A;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3F3F46;
+  }
+}
+
+/* Editorial Glass & Gradient card effects */
+.editorial-card {
+  background-color: #111113;
+  border: 1px solid #27272A;
+}
+
+.editorial-card-hover {
+  transition: all 0.2s ease-in-out;
+}
+.editorial-card-hover:hover {
+  border-color: rgba(245, 158, 11, 0.4);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 20px -5px rgba(245, 158, 11, 0.1);
+}
+
+.gold-gradient-bg {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 50%, #78350f 100%);
+}
+
+.gold-badge-bg {
+  background: linear-gradient(135deg, #fbbf24 0%, #b45309 100%);
+}
+
