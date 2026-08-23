@@ -1,20 +1,20 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Music, ShieldCheck, User, Lock, Mail, Phone, ArrowRight, Sparkles, KeyRound } from 'lucide-react';
+import { Music, ShieldCheck, User, Lock, Mail, Phone, ArrowRight, KeyRound } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { loginAsAdmin, loginAsStudent, students, settings, switchUserRole } = useApp();
+  const { loginAsAdmin, loginAsStudent, settings } = useApp();
   const [roleTab, setRoleTab] = useState<'admin' | 'student'>('admin');
 
   // Admin form
-  const [adminIdentifier, setAdminIdentifier] = useState('admin@symphonymusic.edu');
-  const [adminPassword, setAdminPassword] = useState('admin123');
+  const [adminIdentifier, setAdminIdentifier] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
 
   // Student form
-  const [studentIdentifier, setStudentIdentifier] = useState('9876543210');
-  const [studentPassword, setStudentPassword] = useState('pass123');
+  const [studentIdentifier, setStudentIdentifier] = useState('');
+  const [studentPassword, setStudentPassword] = useState('');
   const [useOtpMode, setUseOtpMode] = useState(false);
-  const [otpCode, setOtpCode] = useState('2026');
+  const [otpCode, setOtpCode] = useState('');
 
   // Forgot password modal
   const [showForgot, setShowForgot] = useState(false);
@@ -140,22 +140,6 @@ export const LoginPage: React.FC = () => {
               <span>Sign In as Academy Director</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-
-            {/* Quick Demo One-Click Fill */}
-            <div className="pt-3 border-t border-zinc-800">
-              <button
-                type="button"
-                onClick={() => {
-                  setAdminIdentifier('admin@symphonymusic.edu');
-                  setAdminPassword('admin123');
-                  loginAsAdmin('admin@symphonymusic.edu', 'admin123');
-                }}
-                className="w-full py-2 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs font-mono text-amber-400 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Instant Demo: Login as Director Vance</span>
-              </button>
-            </div>
           </form>
         )}
 
@@ -247,37 +231,6 @@ export const LoginPage: React.FC = () => {
               <span>Access Student Portal</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-
-            {/* Quick Demo Student Selector */}
-            <div className="pt-3 border-t border-zinc-800">
-              <p className="text-[11px] text-zinc-400 mb-2 font-mono">
-                Quick Test with Student Accounts:
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {students.slice(0, 4).map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => switchUserRole('student', s.id)}
-                    className="p-2 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-lg text-left transition-colors flex items-center gap-2 cursor-pointer"
-                  >
-                    <img
-                      src={s.avatar}
-                      alt={s.fullName}
-                      className="w-6 h-6 rounded-full object-cover shrink-0 border border-zinc-700"
-                    />
-                    <div className="min-w-0 font-mono">
-                      <div className="text-xs text-zinc-200 truncate font-sans">
-                        {s.fullName.split(' ')[0]}
-                      </div>
-                      <div className="text-[10px] text-zinc-500 truncate">
-                        {s.studentCode}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
           </form>
         )}
       </div>
