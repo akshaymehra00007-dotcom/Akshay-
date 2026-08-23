@@ -16,19 +16,13 @@ import {
   UserRole,
 } from '../types';
 import {
-  initialAdmin,
-  initialBatches,
-  initialCourses,
-  initialFeeRecords,
-  initialMembershipPlans,
-  initialNotifications,
   initialSettings,
-  initialStudents,
-  initialTransactions,
 } from '../data/seedData';
 import { calculateFeeStatus, calculateMembershipStatus } from '../services/dueEngine';
 import { addMonths, getTodayString } from '../utils/dateUtils';
 import { playSuccessChime, playNotificationPing } from '../utils/audioChime';
+import { supabase } from '../lib/supabase';
+import { loadPortalData, toDb } from '../services/database';
 
 export interface ToastMessage {
   id: string;
@@ -66,8 +60,8 @@ interface AppContextType {
   currentUser: CurrentUserSession | null;
   adminUser: AdminUser | null;
   currentStudent: Student | null;
-  loginAsAdmin: (emailOrPhone: string, pass: string) => boolean;
-  loginAsStudent: (mobileOrEmail: string, passOrOtp: string) => boolean;
+  loginAsAdmin: (emailOrPhone: string, pass: string) => Promise<boolean>;
+  loginAsStudent: (mobileOrEmail: string, passOrOtp: string) => Promise<boolean>;
   logout: () => void;
   switchUserRole: (role: UserRole, studentId?: string) => void;
 
@@ -199,46 +193,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Always start logged out. A visitor must authenticate before any portal is rendered.
   const [currentRole, setCurrentRole] = useState<UserRole | null>(null);
 
-  const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
-    return loadFromStorage<AdminUser | null>('ADMIN_USER', initialAdmin);
-  });
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
 
   const [currentStudent, setCurrentStudent] = useState<Student | null>(null);
 
   // Main Data States
-  const [students, setStudents] = useState<Student[]>(() => {
-    return loadFromStorage('STUDENTS', initialStudents);
-  });
+  const [students, setStudents] = useState<Student[]>([]);
 
-  const [courses, setCourses] = useState<Course[]>(() => {
-    return loadFromStorage('COURSES', initialCourses);
-  });
+  const [courses, setCourses] = useState<Course[]>([]);
 
-  const [batches, setBatches] = useState<Batch[]>(() => {
-    return loadFromStorage('BATCHES', initialBatches);
-  });
+  const [batches, setBatches] = useState<Batch[]>([]);
 
-  const [membershipPlans, setMembershipPlans] = useState<MembershipPlan[]>(() => {
-    return loadFromStorage('MEMBERSHIP_PLANS', initialMembershipPlans);
-  });
+  const [membershipPlans, setMembershipPlans] = useState<MembershipPlan[]>([]);
 
-  const [feeRecords, setFeeRecords] = useState<FeeRecord[]>(() => {
-    return loadFromStorage('FEE_RECORDS', initialFeeRecords);
-  });
+  const [feeRecords, setFeeRecords] = useState<FeeRecord[]>([]);
 
-  const [transactions, setTransactions] = useState<PaymentTransaction[]>(() => {
-    return loadFromStorage('TRANSACTIONS', initialTransactions);
-  });
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
 
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    return loadFromStorage('NOTIFICATIONS', initialNotifications);
-  });
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   const [settings, setSettings] = useState<InstituteSettings>(() => {
     return loadFromStorage('SETTINGS', initialSettings);
   });
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [dbReady, setDbReady] = useState(false);
+
+  const hydrateFromDatabase = useCallback(async () => {
+    const data = await loadPortalData();
+    setAdminUser(data.admin);
+    setStudents(data.students);
+    setCourses(data.courses);
+    setBatches(data.batches);
+    setMembershipPlans(data.plans);
+    setFeeRecords(data.fees);
+    setTransactions(data.payments);
+    setNotifications(data.notifications);
+    setSettings(data.settings);
+    if (data.profile.role === 'admin') setCurrentRole('admin');
+    else { setCurrentRole('student'); setCurrentStudent(data.students[0] || null); }
+    setDbReady(true);
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => { if (data.session) hydrateFromDatabase().catch(console.error); });
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') { setCurrentRole(null); setCurrentStudent(null); setDbReady(false); }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, [hydrateFromDatabase]);
+
+  useEffect(() => {
+    if (!dbReady || currentRole !== 'admin') return;
+    const sync = async () => {
+      const results = await Promise.all([
+        courses.length ? supabase.from('courses').upsert(courses.map(toDb.course)) : Promise.resolve({error:null}),
+        batches.length ? supabase.from('batches').upsert(batches.map(toDb.batch)) : Promise.resolve({error:null}),
+        membershipPlans.length ? supabase.from('membership_plans').upsert(membershipPlans.map(toDb.plan)) : Promise.resolve({error:null}),
+        students.length ? supabase.from('students').upsert(students.map(toDb.student)) : Promise.resolve({error:null}),
+        feeRecords.length ? supabase.from('monthly_fees').upsert(feeRecords.map(toDb.fee)) : Promise.resolve({error:null}),
+        transactions.length ? supabase.from('payments').upsert(transactions.map(toDb.payment)) : Promise.resolve({error:null}),
+        notifications.length ? supabase.from('notifications').upsert(notifications.map(toDb.notification)) : Promise.resolve({error:null}),
+      ]);
+      const failure = results.find((r:any)=>r.error) as any;
+      if (failure?.error) console.error('Supabase sync failed', failure.error);
+    };
+    const timer = window.setTimeout(sync, 250);
+    return () => window.clearTimeout(timer);
+  }, [dbReady,currentRole,courses,batches,membershipPlans,students,feeRecords,transactions,notifications]);
 
   // Computed Current User Session
   const currentUser: CurrentUserSession | null = useMemo(() => {
@@ -400,45 +422,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [students, feeRecords]);
 
   // Auth Handlers
-  const loginAsAdmin = (emailOrPhone: string, _pass: string): boolean => {
-    const isMatch =
-      emailOrPhone.toLowerCase() === 'admin@symphonymusic.edu' ||
-      emailOrPhone === '9845012345' ||
-      emailOrPhone.toLowerCase().includes('admin');
-
-    if (isMatch && _pass === 'admin123') {
-      setCurrentRole('admin');
-      setAdminUser(initialAdmin);
-      showToast(`Welcome back, ${initialAdmin.name}!`, 'success', 'Admin Signed In');
+  const loginAsAdmin = async (identifier: string, password: string): Promise<boolean> => {
+    const credentials = identifier.includes('@') ? { email: identifier.trim(), password } : { phone: identifier.replace(/\s/g,''), password };
+    const { error } = await supabase.auth.signInWithPassword(credentials);
+    if (error) { showToast(error.message, 'error'); return false; }
+    try {
+      const data = await loadPortalData();
+      if (data.profile.role !== 'admin') { await supabase.auth.signOut(); showToast('This account does not have admin access.', 'error'); return false; }
+      await hydrateFromDatabase();
+      showToast(`Welcome back, ${data.profile.full_name}!`, 'success', 'Admin Signed In');
       return true;
-    }
-    showToast('Invalid admin credentials. Use admin@symphonymusic.edu / admin123', 'error');
-    return false;
+    } catch (error:any) { await supabase.auth.signOut(); showToast(error.message || 'Unable to load account', 'error'); return false; }
   };
 
-  const loginAsStudent = (mobileOrEmail: string, _passOrOtp: string): boolean => {
-    const cleanQuery = mobileOrEmail.trim().toLowerCase().replace(/[^a-z0-9@.]/g, '');
-    const found = students.find((s) => {
-      const sMobile = s.mobile.replace(/[^0-9]/g, '');
-      return (
-        s.email.toLowerCase() === cleanQuery ||
-        sMobile.includes(cleanQuery) ||
-        s.studentCode.toLowerCase() === cleanQuery ||
-        s.fullName.toLowerCase().includes(cleanQuery)
-      );
-    });
-
-    if (found) {
-      setCurrentRole('student');
-      setCurrentStudent(found);
-      showToast(`Welcome back, ${found.fullName}!`, 'success', 'Student Portal');
+  const loginAsStudent = async (identifier: string, password: string): Promise<boolean> => {
+    if (!identifier.includes('@') && /[a-z]/i.test(identifier)) { showToast('Use your registered email or phone number to sign in.', 'error'); return false; }
+    const credentials = identifier.includes('@') ? { email: identifier.trim(), password } : { phone: identifier.replace(/\s/g,''), password };
+    const { error } = await supabase.auth.signInWithPassword(credentials);
+    if (error) { showToast(error.message, 'error'); return false; }
+    try {
+      const data = await loadPortalData();
+      if (data.profile.role !== 'student' || !data.students[0]) { await supabase.auth.signOut(); showToast('No student profile is linked to this account.', 'error'); return false; }
+      await hydrateFromDatabase();
+      showToast(`Welcome back, ${data.students[0].fullName}!`, 'success', 'Student Portal');
       return true;
-    }
-    showToast('Student not found with this mobile or email. Try "rahul" or "9876543210".', 'error');
-    return false;
+    } catch (error:any) { await supabase.auth.signOut(); showToast(error.message || 'Unable to load account', 'error'); return false; }
   };
 
   const logout = () => {
+    void supabase.auth.signOut();
     setCurrentRole(null);
     setCurrentStudent(null);
     localStorage.removeItem(LOCAL_STORAGE_KEY_PREFIX + 'CURRENT_ROLE');
@@ -467,7 +479,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const codeNumber = (students.length + 1).toString().padStart(3, '0');
     const newStudent: Student = {
       ...newStudentData,
-      id: 'stud_' + Date.now(),
+      id: crypto.randomUUID(),
       studentCode: `SMA-2026-${codeNumber}`,
     };
 
@@ -476,7 +488,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Create an initial fee record for current month
     const dueDate = `${getTodayString().slice(0, 8)}${String(newStudent.feeDueDay).padStart(2, '0')}`;
     const initialFee: FeeRecord = {
-      id: 'fee_' + Date.now(),
+      id: crypto.randomUUID(),
       studentId: newStudent.id,
       studentName: newStudent.fullName,
       monthYear: 'August 2026',
@@ -491,7 +503,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Admin Notification
     const notif: AppNotification = {
-      id: 'notif_' + Date.now(),
+      id: crypto.randomUUID(),
       targetRole: 'admin',
       title: 'New Student Enrolled',
       message: `${newStudent.fullName} joined for ${newStudent.monthlyFee}/month.`,
@@ -521,6 +533,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteStudent = (id: string) => {
+    void supabase.from('students').delete().eq('id', id);
     const studentToDelete = students.find((s) => s.id === id);
     setStudents((prev) => prev.filter((s) => s.id !== id));
     setFeeRecords((prev) => prev.filter((f) => f.studentId !== id));
@@ -532,7 +545,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Courses & Batches
   const addCourse = (course: Omit<Course, 'id'>) => {
-    const newCourse: Course = { ...course, id: 'c_' + Date.now() };
+    const newCourse: Course = { ...course, id: crypto.randomUUID() };
     setCourses((prev) => [...prev, newCourse]);
     showToast(`Course "${course.name}" added`, 'success');
   };
@@ -543,12 +556,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteCourse = (id: string) => {
+    void supabase.from('courses').delete().eq('id', id);
     setCourses((prev) => prev.filter((c) => c.id !== id));
     showToast('Course deleted', 'info');
   };
 
   const addBatch = (batch: Omit<Batch, 'id'>) => {
-    const newBatch: Batch = { ...batch, id: 'b_' + Date.now() };
+    const newBatch: Batch = { ...batch, id: crypto.randomUUID() };
     setBatches((prev) => [...prev, newBatch]);
     showToast(`Batch "${batch.name}" added`, 'success');
   };
@@ -559,13 +573,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteBatch = (id: string) => {
+    void supabase.from('batches').delete().eq('id', id);
     setBatches((prev) => prev.filter((b) => b.id !== id));
     showToast('Batch deleted', 'info');
   };
 
   // Membership Plans
   const addMembershipPlan = (plan: Omit<MembershipPlan, 'id'>) => {
-    const newPlan: MembershipPlan = { ...plan, id: 'plan_' + Date.now() };
+    const newPlan: MembershipPlan = { ...plan, id: crypto.randomUUID() };
     setMembershipPlans((prev) => [...prev, newPlan]);
     showToast(`Membership plan "${plan.name}" added`, 'success');
   };
@@ -639,7 +654,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Create payment transaction
     const txNumber = 'REC-2026-' + Math.floor(1000 + Math.random() * 9000);
     const newTx: PaymentTransaction = {
-      id: 'tx_' + Date.now(),
+      id: crypto.randomUUID(),
       feeRecordId,
       studentId,
       studentName,
@@ -657,7 +672,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // In-app notifications
     const adminNotif: AppNotification = {
-      id: 'notif_' + Date.now(),
+      id: crypto.randomUUID(),
       targetRole: 'admin',
       title: 'Payment Recorded',
       message: `Fee of ${settings.currencySymbol}${finalAmount} recorded for ${studentName} (${monthYear}) via ${finalMethod}.`,
@@ -667,7 +682,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const studentNotif: AppNotification = {
-      id: 'notif_s_' + Date.now(),
+      id: crypto.randomUUID(),
       targetRole: 'student',
       targetStudentId: studentId,
       title: 'Payment Recorded Successfully',
@@ -692,7 +707,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!student) return;
 
     const newFee: FeeRecord = {
-      id: 'fee_' + Date.now(),
+      id: crypto.randomUUID(),
       studentId,
       studentName: student.fullName,
       monthYear,
@@ -706,7 +721,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFeeRecords((prev) => [newFee, ...prev]);
 
     const notif: AppNotification = {
-      id: 'notif_f_' + Date.now(),
+      id: crypto.randomUUID(),
       targetRole: 'student',
       targetStudentId: studentId,
       title: 'New Fee Invoice Generated',
@@ -766,7 +781,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const txNumber = 'MEM-2026-' + Math.floor(1000 + Math.random() * 9000);
     const tx: PaymentTransaction = {
-      id: 'tx_mem_' + Date.now(),
+      id: crypto.randomUUID(),
       studentId,
       studentName: student.fullName,
       amount: plan.price,
@@ -782,7 +797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTransactions((prev) => [tx, ...prev]);
 
     const adminNotif: AppNotification = {
-      id: 'notif_mem_a_' + Date.now(),
+      id: crypto.randomUUID(),
       targetRole: 'admin',
       title: 'Membership Renewed',
       message: `${student.fullName} renewed "${plan.name}" until ${newEndDate}.`,
@@ -792,7 +807,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const studentNotif: AppNotification = {
-      id: 'notif_mem_s_' + Date.now(),
+      id: crypto.randomUUID(),
       targetRole: 'student',
       targetStudentId: studentId,
       title: 'Membership Renewed Successfully',
@@ -811,12 +826,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const markNotificationAsRead = (id: string) => {
+    void supabase.from('notifications').update({ read: true }).eq('id', id);
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
   };
 
   const markAllNotificationsAsRead = (targetRole: UserRole) => {
+    const roles = targetRole === 'admin' ? ['admin','all'] : ['student','all'];
+    void supabase.from('notifications').update({read:true}).in('target_role', roles);
     setNotifications((prev) =>
       prev.map((n) => {
         if (targetRole === 'admin' && (n.targetRole === 'admin' || n.targetRole === 'all')) {
@@ -839,7 +857,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     type: 'fee' | 'membership' | 'payment' | 'system'
   ) => {
     const notif: AppNotification = {
-      id: 'notif_custom_' + Date.now(),
+      id: crypto.randomUUID(),
       targetRole,
       targetStudentId,
       title,
@@ -854,20 +872,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateSettings = (newSettings: Partial<InstituteSettings>) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
+    const merged = { ...settings, ...newSettings };
+    void supabase.from('institute_settings').update({ institute_name:merged.instituteName, tagline:merged.tagline||merged.instituteTagline, logo_url:merged.logoUrl||null, contact_email:merged.contactEmail||merged.instituteEmail||null, contact_phone:merged.contactPhone||merged.institutePhone||null, whatsapp_number:merged.whatsappNumber||null, address:merged.address||merged.instituteAddress||null, currency_symbol:merged.currencySymbol, currency_code:merged.currencyCode||'INR', default_fee_due_day:merged.defaultFeeDueDay||5, late_fee_amount:merged.lateFeeAmount||0, fee_reminder_template:merged.feeReminderTemplate||merged.whatsappFeeReminderTemplate||null, overdue_reminder_template:merged.overdueReminderTemplate||merged.whatsappOverdueReminderTemplate||null, membership_reminder_template:merged.membershipReminderTemplate||merged.whatsappMembershipExpiryTemplate||null, upi_id:merged.upiId||null, bank_details:merged.bankDetails||null, enable_sound_effects:merged.enableSoundEffects??true, enable_auto_whatsapp_prompt:merged.enableAutoWhatsAppPrompt??true }).eq('id',true);
     showToast('Academy settings saved successfully', 'success');
   };
 
   const resetDataToDefault = () => {
-    setStudents(initialStudents);
-    setCourses(initialCourses);
-    setBatches(initialBatches);
-    setMembershipPlans(initialMembershipPlans);
-    setFeeRecords(initialFeeRecords);
-    setTransactions(initialTransactions);
-    setNotifications(initialNotifications);
-    setSettings(initialSettings);
-    setCurrentStudent(initialStudents[0]);
-    showToast('All data reset to academy default state', 'info');
+    void hydrateFromDatabase().then(() => showToast('Latest database data restored', 'info'));
   };
 
   return (

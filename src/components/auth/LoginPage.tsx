@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Music, ShieldCheck, User, Lock, Mail, Phone, ArrowRight, KeyRound } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export const LoginPage: React.FC = () => {
   const { loginAsAdmin, loginAsStudent, settings } = useApp();
@@ -21,14 +22,14 @@ export const LoginPage: React.FC = () => {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSuccess, setForgotSuccess] = useState(false);
 
-  const handleAdminSubmit = (e: React.FormEvent) => {
+  const handleAdminSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    loginAsAdmin(adminIdentifier, adminPassword);
+    await loginAsAdmin(adminIdentifier, adminPassword);
   };
 
-  const handleStudentSubmit = (e: React.FormEvent) => {
+  const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    loginAsStudent(studentIdentifier, useOtpMode ? otpCode : studentPassword);
+    await loginAsStudent(studentIdentifier, useOtpMode ? otpCode : studentPassword);
   };
 
   return (
@@ -273,7 +274,10 @@ export const LoginPage: React.FC = () => {
               {!forgotSuccess && (
                 <button
                   type="button"
-                  onClick={() => setForgotSuccess(true)}
+                  onClick={async () => {
+                    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, { redirectTo: window.location.origin });
+                    if (!error) setForgotSuccess(true);
+                  }}
                   className="flex-1 py-2 px-3 bg-amber-500 hover:bg-amber-400 rounded-xl text-xs font-bold text-zinc-950 cursor-pointer"
                 >
                   Send Link

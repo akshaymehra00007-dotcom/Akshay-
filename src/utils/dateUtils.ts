@@ -1,6 +1,6 @@
 // Utilities for date manipulation and formatting
 
-export const APP_TODAY = '2026-08-22';
+export const APP_TODAY = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 export function getTodayDate(): Date {
   // Anchored to simulated current app time or real Date
